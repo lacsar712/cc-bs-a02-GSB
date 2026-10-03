@@ -1,4 +1,8 @@
-"""后台工人：用 SKIP LOCKED 认领 pending 应变读数并写入合格/越界结论。"""
+"""后台工人：用 SKIP LOCKED 认领 pending 应变读数。
+
+认领瞬间锁定该读数对应的荷载等级行，把当时的闭区间上下限抄进单据快照，
+随后按快照判定——改档只影响之后认领的新单，处理中的单沿用领取瞬间那一档。
+"""
 
 import os
 import time
@@ -13,46 +17,73 @@ def claim_one(conn):
     with conn.transaction():
         row = conn.execute(
             """
-            SELECT id, microstrain
-            FROM strain_readings
-            WHERE status = 'pending'
-            ORDER BY id
-            FOR UPDATE SKIP LOCKED
+            SELECT r.id, r.microstrain, r.load_grade
+            FROM strain_readings r
+            WHERE r.status = 'pending'
+            ORDER BY r.id
+            FOR UPDATE OF r SKIP LOCKED
             LIMIT 1
             """
         ).fetchone()
         if not row:
             return None
+        # 锁定等级行：与测量员改档串行化，锁拿到手的那一档就是“领取瞬间”的档。
+        grade = conn.execute(
+            """
+            SELECT grade_name, lower_bound, upper_bound
+            FROM load_grades
+            WHERE grade_code = %s
+            FOR UPDATE
+            """,
+            (row["load_grade"],),
+        ).fetchone()
         conn.execute(
-            "UPDATE strain_readings SET status = 'processing' WHERE id = %s",
-            (row["id"],),
+            """
+            UPDATE strain_readings
+            SET status = 'processing',
+                grade_lower = %s,
+                grade_upper = %s
+            WHERE id = %s
+            """,
+            (grade["lower_bound"], grade["upper_bound"], row["id"]),
         )
-        return row
+        return {
+            "id": row["id"],
+            "microstrain": float(row["microstrain"]),
+            "grade_name": grade["grade_name"],
+            "lower_bound": float(grade["lower_bound"]),
+            "upper_bound": float(grade["upper_bound"]),
+        }
 
 
-def finish(conn, reading_id: int, microstrain: float) -> None:
-    verdict, reason = judge_microstrain(microstrain)
+def finish(conn, claimed: dict) -> None:
+    verdict, reason = judge_microstrain(
+        claimed["microstrain"],
+        claimed["lower_bound"],
+        claimed["upper_bound"],
+        claimed["grade_name"],
+    )
     conn.execute(
         """
         UPDATE strain_readings
         SET status = 'done', verdict = %s, reason = %s, processed_at = now()
         WHERE id = %s
         """,
-        (verdict, reason, reading_id),
+        (verdict, reason, claimed["id"]),
     )
     conn.commit()
 
 
 def run_once(conn) -> bool:
-    row = claim_one(conn)
-    if not row:
+    claimed = claim_one(conn)
+    if not claimed:
         return False
     try:
-        finish(conn, row["id"], float(row["microstrain"]))
+        finish(conn, claimed)
     except Exception:
         conn.execute(
             "UPDATE strain_readings SET status = 'pending' WHERE id = %s",
-            (row["id"],),
+            (claimed["id"],),
         )
         conn.commit()
         raise
