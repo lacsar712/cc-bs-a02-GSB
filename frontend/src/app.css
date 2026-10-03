@@ -42,6 +42,56 @@ h1 {
   margin-bottom: 1rem;
 }
 
+.top-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-shrink: 0;
+}
+
+.user-chip {
+  font-size: 0.9rem;
+  color: #333;
+  white-space: nowrap;
+}
+
+button.active-nav {
+  background: #0d3c61;
+}
+
+select {
+  padding: 0.45rem 0.6rem;
+  border: 1px solid #bbb;
+  border-radius: 4px;
+  min-width: 180px;
+  background: #fff;
+}
+
+input.bound {
+  min-width: 110px;
+}
+
+td.note-cell {
+  min-width: 180px;
+}
+
+input.note {
+  min-width: 160px;
+  width: 100%;
+}
+
+.note-list {
+  margin: 0;
+  padding-left: 1.25rem;
+  color: #333;
+  font-size: 0.92rem;
+  line-height: 1.7;
+}
+
+.note-list li {
+  margin-bottom: 0.25rem;
+}
+
 .row {
   display: flex;
   flex-wrap: wrap;
